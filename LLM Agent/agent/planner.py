@@ -1,7 +1,12 @@
-import os, json
+import json
+import os
+
 from openai import OpenAI
-from .schemas import Plan
+from pydantic import ValidationError
+
 from .prompts import SYSTEM_PROMPT
+from .schemas import Plan
+
 
 def make_plan(user_text: str) -> Plan:
     # 這裡才讀環境變數（確保 main.py 已 load_dotenv）
@@ -20,8 +25,16 @@ def make_plan(user_text: str) -> Plan:
         temperature=0.2,
     )
 
-    raw = resp.choices[0].message.content.strip()
+    raw = (resp.choices[0].message.content or "").strip()
+    if not raw:
+        raise RuntimeError("LLM 回傳空內容，無法產生計畫。")
 
-    # 解析 JSON + schema 驗證
-    data = json.loads(raw)
-    return Plan.model_validate(data)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"LLM 回傳非 JSON 格式內容：{raw}") from exc
+
+    try:
+        return Plan.model_validate(data)
+    except ValidationError as exc:
+        raise RuntimeError(f"LLM 回傳 JSON 結構不符合 Plan schema：{data}") from exc
